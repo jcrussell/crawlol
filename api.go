@@ -27,17 +27,62 @@ const (
 // Struct for maintaining crawler state including the timestamps of recent
 // requests so that we can perform rate limiting.
 type crawler struct {
-	Token              string       // API Key for authentication
-	RateLimitPerMinute uint         // Maximum number of requests per minute
-	RateLimitPerHour   uint         // Maximum number of requests per hour
-	MaxRetries         int          // Maximum number of times to retry a request
-	Client             *http.Client // Client for making requests
-	Requests           []int64      // Timestamps for the most recent requests
+	Token                  string       // API Key for authentication
+	RateLimitPerTenSeconds int          // Maximum number of requests per ten seconds
+	RateLimitPerHour       int          // Maximum number of requests per hour
+	MaxRetries             int          // Maximum number of times to retry a request
+	Client                 *http.Client // Client for making requests
+	Requests               []time.Time  // Timestamps for the most recent requests
 }
 
 // Block until rate limit is not exceeded
 func (c *crawler) rateLimit() {
-	// TODO: handle rate limiting
+	// Get the current time in
+	now := time.Now()
+	minusHour := now.Add(-1 * time.Hour)
+	minusSeconds := now.Add(-10 * time.Second)
+
+	// Time to sleep for, max of rate limited for per-ten-second and per-hour
+	// requests.
+	var sleep time.Duration
+
+	// Prune off requests that are more than one hour old
+	for i, t := range c.Requests {
+		if minusHour.Before(t) {
+			c.Requests = c.Requests[i:]
+			break
+		}
+	}
+
+	// Count the number of requests in the last hour
+	if len(c.Requests) >= c.RateLimitPerHour {
+		// Sleep until oldest request plus one hour has passed
+		sleep = c.Requests[0].Add(time.Hour).Sub(now)
+	}
+
+	// Count the number of requests in the last second
+	for i, t := range c.Requests {
+		if minusSeconds.Before(t) {
+			// Count the number of requests in the last ten seconds
+			if len(c.Requests)-i >= c.RateLimitPerTenSeconds {
+				// Sleep until oldest request in the last second plus one second has
+				// passed. Only update sleep if it's longer than the previously
+				// computed sleep time.
+				d := c.Requests[i].Add(10 * time.Second).Sub(now)
+				if d > sleep {
+					sleep = d
+				}
+			}
+
+			break
+		}
+	}
+
+	// Sleep for the predetermined amount of time
+	time.Sleep(sleep)
+
+	// Add current time to list of requests
+	c.Requests = append(c.Requests, time.Now())
 }
 
 // Take a base URL and add query parameters from map to the end of the URL. If

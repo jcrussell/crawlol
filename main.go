@@ -16,8 +16,8 @@ var (
 func main() {
 	// TODO: Get token, rate limits from command line
 	c := crawler{Token: "",
-		RateLimitPerMinute: 60,
-		RateLimitPerHour:   500}
+		RateLimitPerTenSeconds: 10,
+		RateLimitPerHour:       500}
 
 	// Find the summoner IDs for the seed summoners
 	summoners, err := c.getSummoners(_SEED_SUMMONERS)
