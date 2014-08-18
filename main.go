@@ -1,15 +1,6 @@
 package main
 
-import (
-	"fmt"
-	"log"
-)
-
-var (
-	_REGION       = "na"
-	_GET_SUMMONER = "https://na.api.pvp.net/api/lol/%s/v1.4/summoner/by-name/%s"
-	_GET_RECENT   = "https://na.api.pvp.net/api/lol/%s/v1.3/game/by-summoner/%d/recent"
-)
+import "log"
 
 var _SEED_SUMMONERS = []string{
 	"colonelxc",
@@ -19,22 +10,17 @@ var _SEED_SUMMONERS = []string{
 }
 
 var (
-	toCrawl = make([]int64)
+	toCrawl = make([]int64, 100)
 )
 
-func doGet(url, token string, dst *interface{}) error {
-	// TODO: Implement, handle rate limiting
-
-	return nil
-}
-
 func main() {
-	// TODO: Get token from command line
+	// TODO: Get token, rate limits from command line
+	c := crawler{Token: "",
+		RateLimitPerMinute: 60,
+		RateLimitPerHour:   500}
 
 	// Find the summoner IDs for the seed summoners
-	var summoners = make(map[string]Summoner)
-	url := fmt.Sprintf(_GET_SUMMONER, _REGION, strings.join(_SEED_SUMMONERS, ","))
-	err := doGet(url, "", summoners)
+	summoners, err := c.getSummoners(_SEED_SUMMONERS)
 	if err != nil {
 		log.Printf("Unable to fetch seed summoners: %s", err.Error())
 		return
@@ -48,18 +34,16 @@ func main() {
 	// Loop until done crawling
 	for len(toCrawl) > 0 {
 		// Pop a summoner off the list of people to crawl
-		summoner, toCrawl = toCrawl[0], toCrawl[1:]
+		summoner, toCrawl := toCrawl[0], toCrawl[1:]
 
 		// Look up the summoner's recent games
-		var games = RecentGames{}
-		url := fmt.Sprintf(_GET_RECENT, _REGION, summoner)
-		err := doGet(url, "", games)
+		games, err := c.getRecentGames(summoner)
 		if err != nil {
 			log.Printf("Unable to fetch recent games for summoner: %d -- %s", summoner, err.Error())
 			return
 		}
 
-		for _, game := range games {
+		for _, game := range games.Games {
 			// TODO: Store the game
 
 			for _, player := range game.FellowPlayers {
