@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -20,8 +21,11 @@ const (
 	_StatusRateLimitExceeded = 429
 
 	// API URLs, ready for fmt.Sprintf
-	_GetSummoner    = "https://na.api.pvp.net/api/lol/%s/v1.4/summoner/by-name/%s"
-	_GetRecentGames = "https://na.api.pvp.net/api/lol/%s/v1.3/game/by-summoner/%d/recent"
+	_GetSummoner     = "https://na.api.pvp.net/api/lol/%s/v1.4/summoner/by-name/%s"
+	_GetSummonerByID = "https://na.api.pvp.net/api/lol/%s/v1.4/summoner/%s"
+	_GetRecentGames  = "https://na.api.pvp.net/api/lol/%s/v1.3/game/by-summoner/%d/recent"
+
+	_MaxSummonersPerQuery = 40
 )
 
 // Struct for maintaining crawler state including the timestamps of recent
@@ -160,20 +164,35 @@ func (c *crawler) fetchResource(url string, dst interface{}) error {
 	return fmt.Errorf("max retries exceeded for API request (last error: %s)", err.Error())
 }
 
-// Lookup summoners by their summoner name. A maximum of 40 summoners is
-// allowed at one time.
+// Lookup summoners by their summoner name. A maximum of _MaxSummonersPerQuery
+// summoners is allowed at one time.
 func (c *crawler) getSummoners(summoners []string) (map[string]Summoner, error) {
-	if len(summoners) > 40 {
-		return nil, errors.New("maximum of 40 summoners per query")
+	return c.getSummonersHelper(_GetSummoner, strings.Join(summoners, ","))
+}
+
+// Lookup summoners by their summoner ID. A maximum of _MaxSummonersPerQuery summoners is allowed
+// at one time.
+func (c *crawler) getSummonersByID(ids []int64) (map[string]Summoner, error) {
+	// Convert ids to strings so we can concat them together
+	s := make([]string, len(ids))
+	for _, id := range ids {
+		s = append(s, strconv.FormatInt(id, 10))
 	}
 
-	log.Printf("Fetching summoners: %v", summoners)
+	return c.getSummonersHelper(_GetSummonerByID, strings.Join(s, ","))
+}
+
+func (c *crawler) getSummonersHelper(url, summoners string) (map[string]Summoner, error) {
+	if strings.Count(summoners, ",") > _MaxSummonersPerQuery {
+		return nil, errors.New("exceeded maximum number of summoners per query")
+	}
+
+	log.Printf("Fetching summoners: %s", summoners)
 
 	var res = make(map[string]Summoner)
 
-	url := fmt.Sprintf(_GetSummoner, _Region, strings.Join(_SEED_SUMMONERS, ","))
-	err := c.fetchResource(url, &res)
-	if err != nil {
+	url = fmt.Sprintf(url, _Region, summoners)
+	if err := c.fetchResource(url, &res); err != nil {
 		return nil, err
 	}
 

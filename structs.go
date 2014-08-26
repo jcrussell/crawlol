@@ -6,6 +6,9 @@ type Summoner struct {
 	ProfileIconID int    // ID of the summoner icon associated with the summoner.
 	RevisionDate  int64  // Date summoner was last modified specified as epoch milliseconds.
 	SummonerLevel int64  // Summoner level associated with the summoner.
+
+	LastCrawled int64  // Last time summoner's games were crawled, specified as epoch milliseconds.
+	Games       []Game // Games that the summoner has played
 }
 
 type RecentGames struct {
@@ -14,27 +17,34 @@ type RecentGames struct {
 }
 
 type Game struct {
-	ChampionID    int      // Champion ID associated with game.
-	CreateDate    int64    // Date that end game data was recorded, specified as epoch milliseconds.
-	FellowPlayers []Player // Other players associated with the game.
-	GameID        int64    // Game ID.
+	ID         int64 // Primary key
+	GameID     int64 // Game ID from Riot, not to be confused with the primary key
+	SummonerID int64 // Foreign key for Summoner
+
+	ChampionID int   // Champion ID associated with game.
+	CreateDate int64 // Date that end game data was recorded, specified as epoch milliseconds.
 	// Game mode: CLASSIC, ODIN, ARAM, TUTORIAL, ONEFORALL, FIRSTBLOOD.
 	GameMode string
 	// Game type: CUSTOM_GAME, MATCHED_GAME, TUTORIAL_GAME.
 	GameType string
-	Invalid  bool     // Invalid flag.
-	IpEarned int      // IP Earned.
-	Level    int      // Level.
-	MapID    int      // Map ID.
-	Spell1   int      // ID of first summoner spell.
-	Spell2   int      // ID of second summoner spell.
-	Stats    RawStats // Statistics associated with the game for this summoner.
+	Invalid  bool // Invalid flag.
+	IpEarned int  // IP Earned.
+	Level    int  // Level.
+	MapID    int  // Map ID.
+	Spell1   int  // ID of first summoner spell.
+	Spell2   int  // ID of second summoner spell.
+
 	/* Game sub-type: NONE, NORMAL, BOT, RANKED_SOLO_5x5, RANKED_PREMADE_3x3,
 	RANKED_PREMADE_5x5, ODIN_UNRANKED, RANKED_TEAM_3x3, RANKED_TEAM_5x5,
 	NORMAL_3x3, BOT_3x3, CAP_5x5, ARAM_UNRANKED_5x5, ONEFORALL_5x5,
 	FIRSTBLOOD_1x1, FIRSTBLOOD_2x2, SR_6x6, URF, URF_BOT, NIGHTMARE_BOT. */
 	SubType string
 	TeamID  int // Team ID associated with game. Team ID 100 is blue team. Team ID 200 is purple team.
+
+	Stats      RawStats // Statistics associated with the game for this summoner.
+	RawStatsID int64    // Foreign key of RawStats
+
+	FellowPlayers []Player `sql:"-"` // Other players associated with the game.
 }
 
 type Player struct {
@@ -44,6 +54,9 @@ type Player struct {
 }
 
 type RawStats struct {
+	ID     int64 // Primary key
+	GameID int64 // Foreign key for Game (note: this is the primary key, not the ID from Riot)
+
 	Assists                         int
 	BarracksKilled                  int // Number of enemy inhibitors killed.
 	ChampionsKilled                 int
