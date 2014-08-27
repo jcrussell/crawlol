@@ -1,9 +1,9 @@
 package main
 
 type Summoner struct {
-	ID            int64  // Summoner ID.
+	Id            int64  // Summoner ID.
 	Name          string // Summoner name.
-	ProfileIconID int    // ID of the summoner icon associated with the summoner.
+	ProfileIconId int    // ID of the summoner icon associated with the summoner.
 	RevisionDate  int64  // Date summoner was last modified specified as epoch milliseconds.
 	SummonerLevel int64  // Summoner level associated with the summoner.
 
@@ -13,15 +13,15 @@ type Summoner struct {
 
 type RecentGames struct {
 	Games      []Game // Collection of recent games played (max 10).
-	SummonerID int64  // Summoner ID.
+	SummonerId int64  // Summoner ID.
 }
 
 type Game struct {
-	ID         int64 // Primary key
-	GameID     int64 // Game ID from Riot, not to be confused with the primary key
-	SummonerID int64 // Foreign key for Summoner
+	Id         int64 // Primary key
+	GameId     int64 // Game ID from Riot, not to be confused with the primary key
+	SummonerId int64 // Foreign key for Summoner
 
-	ChampionID int   // Champion ID associated with game.
+	ChampionId int   // Champion ID associated with game.
 	CreateDate int64 // Date that end game data was recorded, specified as epoch milliseconds.
 	// Game mode: CLASSIC, ODIN, ARAM, TUTORIAL, ONEFORALL, FIRSTBLOOD.
 	GameMode string
@@ -30,7 +30,7 @@ type Game struct {
 	Invalid  bool // Invalid flag.
 	IpEarned int  // IP Earned.
 	Level    int  // Level.
-	MapID    int  // Map ID.
+	MapId    int  // Map ID.
 	Spell1   int  // ID of first summoner spell.
 	Spell2   int  // ID of second summoner spell.
 
@@ -39,23 +39,23 @@ type Game struct {
 	NORMAL_3x3, BOT_3x3, CAP_5x5, ARAM_UNRANKED_5x5, ONEFORALL_5x5,
 	FIRSTBLOOD_1x1, FIRSTBLOOD_2x2, SR_6x6, URF, URF_BOT, NIGHTMARE_BOT. */
 	SubType string
-	TeamID  int // Team ID associated with game. Team ID 100 is blue team. Team ID 200 is purple team.
+	TeamId  int // Team ID associated with game. Team ID 100 is blue team. Team ID 200 is purple team.
 
 	Stats      RawStats // Statistics associated with the game for this summoner.
-	RawStatsID int64    // Foreign key of RawStats
+	RawStatsId int64    // Foreign key of RawStats
 
 	FellowPlayers []Player `sql:"-"` // Other players associated with the game.
 }
 
 type Player struct {
-	ChampionID int   // ChampionintChampion id associated with player.
-	SummonerID int64 // Summoner id associated with player.
-	TeamID     int   // TeamintTeam id associated with player.
+	ChampionId int   // ChampionintChampion id associated with player.
+	SummonerId int64 // Summoner id associated with player.
+	TeamId     int   // TeamintTeam id associated with player.
 }
 
 type RawStats struct {
-	ID     int64 // Primary key
-	GameID int64 // Foreign key for Game (note: this is the primary key, not the ID from Riot)
+	Id     int64 // Primary key
+	GameId int64 // Foreign key for Game (note: this is the primary key, not the ID from Riot)
 
 	Assists                         int
 	BarracksKilled                  int // Number of enemy inhibitors killed.
@@ -138,20 +138,20 @@ type RawStats struct {
 type RankedStats struct {
 	ChampionsKilled []ChampionStats // Collection of aggregated stats summarized by champion.
 	ModifyDate      int64           // Date stats were last modified specified as epoch milliseconds.
-	SummonerID      int64           // Summoner ID.
+	SummonerId      int64           // Summoner ID.
 }
 
 type ChampionStats struct {
 	/* Champion ID. Note that champion ID 0 represents the combined stats for all
 	champions. For static information correlating to champion IDs, please refer to
 	the LoL Static Data API. */
-	ID    int
+	Id    int
 	Stats AggregatedStats // Aggregated stats associated with the champion.
 }
 
 type PlayerStatsSummaryList struct {
 	PlayerStatSummaries []PlayerStatsSummary //Collection of player stats summaries associated with the summoner.
-	SummonerID          int64                // Summoner ID.
+	SummonerId          int64                // Summoner ID.
 }
 
 type PlayerStatsSummary struct {

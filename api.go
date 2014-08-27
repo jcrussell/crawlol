@@ -33,46 +33,59 @@ const (
 type crawler struct {
 	Token                  string       // API Key for authentication
 	RateLimitPerTenSeconds int          // Maximum number of requests per ten seconds
-	RateLimitPerHour       int          // Maximum number of requests per hour
+	RateLimitPerTenMinutes int          // Maximum number of requests per ten minutes
 	MaxRetries             int          // Maximum number of times to retry a request
 	Client                 *http.Client // Client for making requests
 	Requests               []time.Time  // Timestamps for the most recent requests
 }
 
+func newCrawler(token string, rateLimitPerTenSeconds, rateLimitPerTenMinutes, maxRetries int) *crawler {
+	return &crawler{
+		Token: token,
+		RateLimitPerTenSeconds: rateLimitPerTenSeconds,
+		RateLimitPerTenMinutes: rateLimitPerTenMinutes,
+		MaxRetries:             maxRetries,
+		Client:                 &http.Client{},
+		Requests:               make([]time.Time, rateLimitPerTenMinutes)}
+
+}
+
 // Block until rate limit is not exceeded
 func (c *crawler) rateLimit() {
-	// Get the current time in
+	// Get the current time
 	now := time.Now()
-	minusHour := now.Add(-1 * time.Hour)
-	minusSeconds := now.Add(-10 * time.Second)
 
-	// Time to sleep for, max of rate limited for per-ten-second and per-hour
-	// requests.
-	var sleep time.Duration
+	// Calculate rate limit intervals
+	minusTenMins := now.Add(-10 * time.Minute)
+	minusTenSecs := now.Add(-10 * time.Second)
 
-	// Prune off requests that are more than one hour old
+	// Time to sleep for, max of rate limited for per-ten-second and
+	// per-ten-minutes requests.
+	var sleep time.Duration = 0
+
+	// Prune off requests that are more than ten minutes old
 	for i, t := range c.Requests {
-		if minusHour.Before(t) {
+		if minusTenMins.Before(t) {
 			c.Requests = c.Requests[i:]
 			break
 		}
 	}
 
-	// Count the number of requests in the last hour
-	if len(c.Requests) >= c.RateLimitPerHour {
-		// Sleep until oldest request plus one hour has passed
-		sleep = c.Requests[0].Add(time.Hour).Sub(now)
+	// Count the number of requests in the last ten minutes
+	if len(c.Requests) >= c.RateLimitPerTenMinutes {
+		// Sleep until oldest request plus ten minutes has passed
+		sleep = c.Requests[0].Add(10*time.Minute + 30*time.Second).Sub(now)
 	}
 
 	// Count the number of requests in the last second
 	for i, t := range c.Requests {
-		if minusSeconds.Before(t) {
+		if minusTenSecs.Before(t) {
 			// Count the number of requests in the last ten seconds
 			if len(c.Requests)-i >= c.RateLimitPerTenSeconds {
 				// Sleep until oldest request in the last second plus one second has
 				// passed. Only update sleep if it's longer than the previously
 				// computed sleep time.
-				d := c.Requests[i].Add(10 * time.Second).Sub(now)
+				d := c.Requests[i].Add(11 * time.Second).Sub(now)
 				if d > sleep {
 					sleep = d
 				}
@@ -81,6 +94,8 @@ func (c *crawler) rateLimit() {
 			break
 		}
 	}
+
+	log.Printf("Rate limiting, sleeping for %f seconds", sleep.Seconds())
 
 	// Sleep for the predetermined amount of time
 	time.Sleep(sleep)
@@ -118,9 +133,8 @@ func (c *crawler) fetchResource(url string, dst interface{}) error {
 		return err
 	}
 
-	retries := 0
-
-	for ; retries < c.MaxRetries; retries++ {
+	for retries := 0; retries < c.MaxRetries; retries++ {
+		log.Printf("Attempting to get URL: %s, retries = %d", u, retries)
 		if retries != 0 {
 			// Didn't succeed on previous attempt, sleep for a bit (in addition to the
 			// rate limiting) before trying again.
@@ -130,38 +144,43 @@ func (c *crawler) fetchResource(url string, dst interface{}) error {
 		// Block until we are able to make a request
 		c.rateLimit()
 
-		resp, err := c.Client.Get(u)
-		if err != nil {
+		resp, err2 := c.Client.Get(u)
+		if err2 != nil {
+			err = err2
 			log.Printf("Failed to request resource. Sleeping and then retrying.")
 			continue
 		}
 
 		if resp.StatusCode == _StatusRateLimitExceeded {
 			log.Printf("Rate limit exceeded. Sleeping and then retrying.")
-			continue
-		} else if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("unexpected status code from server: %s", resp.Status)
-		} else {
+		} else if resp.StatusCode == http.StatusOK {
 			// Got a valid response
 			defer resp.Body.Close()
 
-			body, err := ioutil.ReadAll(resp.Body)
-			if err != nil {
+			body, err2 := ioutil.ReadAll(resp.Body)
+			if err2 != nil {
+				err = err2
 				log.Printf("Failed to read response body. Sleeping and then retrying.")
 				continue
 			}
 
-			if err := json.Unmarshal(body, dst); err != nil {
+			if err2 := json.Unmarshal(body, dst); err2 != nil {
+				err = err2
 				log.Printf("Failed to unmarshal response body. Sleeping and then retrying.")
-				continue
 			} else {
-				// Success!
-				return nil
+				return nil // Success!
 			}
+		} else {
+			err = fmt.Errorf("unexpected status code from server: %s", resp.Status)
+			log.Printf(err.Error())
 		}
 	}
 
-	return fmt.Errorf("max retries exceeded for API request (last error: %s)", err.Error())
+	if err != nil {
+		return fmt.Errorf("max retries exceeded for API request (last error: %s)", err.Error())
+	}
+
+	return errors.New("unknown error occured while fetching resource")
 }
 
 // Lookup summoners by their summoner name. A maximum of _MaxSummonersPerQuery
@@ -174,7 +193,7 @@ func (c *crawler) getSummoners(summoners []string) (map[string]Summoner, error) 
 // at one time.
 func (c *crawler) getSummonersByID(ids []int64) (map[string]Summoner, error) {
 	// Convert ids to strings so we can concat them together
-	s := make([]string, len(ids))
+	s := make([]string, 0, len(ids))
 	for _, id := range ids {
 		s = append(s, strconv.FormatInt(id, 10))
 	}
@@ -187,7 +206,7 @@ func (c *crawler) getSummonersHelper(url, summoners string) (map[string]Summoner
 		return nil, errors.New("exceeded maximum number of summoners per query")
 	}
 
-	log.Printf("Fetching summoners: %s", summoners)
+	//log.Printf("Fetching summoners: %s", summoners)
 
 	var res = make(map[string]Summoner)
 
