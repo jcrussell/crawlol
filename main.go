@@ -39,6 +39,7 @@ func crawl(db gorm.DB, c *crawler) {
 		log.Printf("Crawling recent games for %d summoners", len(summoners))
 
 		newSummoners := make(map[int64]bool, 100)
+		newGames := 0
 
 		for _, summoner := range summoners {
 			// Look up the summoner's recent games
@@ -49,17 +50,18 @@ func crawl(db gorm.DB, c *crawler) {
 			}
 
 			for _, game := range recent.Games {
-				// TODO: Check errors.
-				//log.Printf("Processing Game: %d", game.GameId)
-
 				// Check if we have already stored this game before
 				if db.Where(&Game{GameId: game.GameId, SummonerId: summoner.Id}).First(&Game{}).RecordNotFound() {
+					newGames++
+
 					// Save new game
 					game.SummonerId = summoner.Id
-					db.Create(&game)
+					if err := db.Create(&game).Error; err != nil {
+						log.Printf("Unable to save game: %d -- summoner: %d", game.GameId, summoner.Id)
+					}
 
+					// Process the players that also played in this game
 					for _, player := range game.FellowPlayers {
-						//log.Printf("Processing Player: %d", player.SummonerId)
 						// Check if we have already crawled summoner ID
 						if db.Where(&Summoner{Id: player.SummonerId}).First(&Summoner{}).RecordNotFound() {
 							// Haven't crawled summoner, add to newSummoners
@@ -68,24 +70,16 @@ func crawl(db gorm.DB, c *crawler) {
 					}
 				}
 			}
-		}
 
-		log.Printf("Found %d new summoners to crawl", len(newSummoners))
-
-		ids := make([]int64, 0)
-
-		for id := range newSummoners {
-			ids = append(ids, id)
-
-			if len(ids) == _MaxSummonersPerQuery {
-				lookupSummoners(db, c, ids)
-				ids = make([]int64, 0)
+			// Update the last crawled time to now for summoner
+			summoner.LastCrawled = time.Now().UnixNano()
+			if err := db.Save(&summoner).Error; err != nil {
+				log.Printf("Unable to update last crawled for summoner: %d -- %s", summoner.Id, err.Error)
 			}
 		}
 
-		if len(ids) > 0 {
-			lookupSummoners(db, c, ids)
-		}
+		log.Printf("Crawled %d games and found %d new summoners", newGames, len(newSummoners))
+		lookupSummoners(db, c, newSummoners)
 	}
 }
 
@@ -121,7 +115,6 @@ func seedDatabase(db gorm.DB, c *crawler) {
 // Save new summoners to the database, set the last crawled time as never.
 func saveSummoners(db gorm.DB, summoners map[string]Summoner) {
 	for _, summoner := range summoners {
-		//log.Printf("Save summoner: %s (Id = %d)", summoner.Name, summoner.Id)
 		summoner.LastCrawled = 0
 		if err := db.Create(&summoner).Error; err != nil {
 			log.Printf("Unable to save summoner: %d -- %s", summoner.Id, err.Error())
@@ -129,13 +122,32 @@ func saveSummoners(db gorm.DB, summoners map[string]Summoner) {
 	}
 }
 
-func lookupSummoners(db gorm.DB, c *crawler, ids []int64) {
-	if summoners, err := c.getSummonersByID(ids); err != nil {
-		log.Printf("Unable to fetch summoners: %s", err.Error())
-	} else {
-		saveSummoners(db, summoners)
+func lookupSummoners(db gorm.DB, c *crawler, summoners map[int64]bool) {
+	ids := make([]int64, 0, len(summoners))
+	for k := range summoners {
+		ids = append(ids, k)
+	}
+
+	for i := 0; i*_MaxSummonersPerQuery < len(ids); i++ {
+		// Create slice of length _MaxSummonersPerQuery or less if there aren't
+		// enough elements remaining.
+		ub := (i + 1) * _MaxSummonersPerQuery
+		if ub >= len(ids) {
+			ub = len(ids) - 1
+		}
+		slice := ids[i*_MaxSummonersPerQuery : ub]
+
+		if res, err := c.getSummonersByID(slice); err != nil {
+			log.Printf("Unable to fetch summoners: %s", err.Error())
+		} else {
+			saveSummoners(db, res)
+		}
 	}
 }
+
+type fakeLogger struct{}
+
+func (fakeLogger) Print(v ...interface{}) {}
 
 func main() {
 	flag.Parse()
@@ -152,6 +164,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("Unable to open database: %s", err.Error())
 	}
+
+	// Disable Gorm's logging
+	db.SetLogger(fakeLogger{})
 
 	if *newDatabase {
 		initDB(db)

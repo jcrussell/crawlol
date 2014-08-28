@@ -95,7 +95,7 @@ func (c *crawler) rateLimit() {
 		}
 	}
 
-	log.Printf("Rate limiting, sleeping for %f seconds", sleep.Seconds())
+	//log.Printf("Rate limiting, sleeping for %f seconds", sleep.Seconds())
 
 	// Sleep for the predetermined amount of time
 	time.Sleep(sleep)
@@ -134,7 +134,7 @@ func (c *crawler) fetchResource(url string, dst interface{}) error {
 	}
 
 	for retries := 0; retries < c.MaxRetries; retries++ {
-		log.Printf("Attempting to get URL: %s, retries = %d", u, retries)
+		//log.Printf("Attempting to get URL: %s, retries = %d", u, retries)
 		if retries != 0 {
 			// Didn't succeed on previous attempt, sleep for a bit (in addition to the
 			// rate limiting) before trying again.
@@ -222,7 +222,7 @@ func (c *crawler) getSummonersHelper(url, summoners string) (map[string]Summoner
 func (c *crawler) getRecentGames(id int64) (*RecentGames, error) {
 	games := &RecentGames{}
 
-	log.Printf("Fetching recent games for summoner: %d", id)
+	//log.Printf("Fetching recent games for summoner: %d", id)
 
 	url := fmt.Sprintf(_GetRecentGames, _Region, id)
 	err := c.fetchResource(url, games)

@@ -41,8 +41,7 @@ type Game struct {
 	SubType string
 	TeamId  int // Team ID associated with game. Team ID 100 is blue team. Team ID 200 is purple team.
 
-	Stats      RawStats // Statistics associated with the game for this summoner.
-	RawStatsId int64    // Foreign key of RawStats
+	Stats RawStats // Statistics associated with the game for this summoner.
 
 	FellowPlayers []Player `sql:"-"` // Other players associated with the game.
 }
