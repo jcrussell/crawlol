@@ -29,7 +29,7 @@ func crawl(db gorm.DB, c *crawler) {
 		lastCrawled := time.Now().Add(-12 * time.Hour)
 
 		var summoners []Summoner
-		db.Where("last_crawled < ?", lastCrawled.UnixNano()).Limit(1000).Find(&summoners)
+		db.Where("last_crawled < ?", lastCrawled.UnixNano()).Order("last_crawled asc").Limit(1000).Find(&summoners)
 
 		if len(summoners) == 0 {
 			log.Printf("All known summoners have been crawled in the last 12 hours")
