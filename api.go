@@ -23,7 +23,8 @@ const (
 	// API URLs, ready for fmt.Sprintf
 	_GetSummoner     = "https://na.api.pvp.net/api/lol/%s/v1.4/summoner/by-name/%s"
 	_GetSummonerByID = "https://na.api.pvp.net/api/lol/%s/v1.4/summoner/%s"
-	_GetRecentGames  = "https://na.api.pvp.net/api/lol/%s/v1.3/game/by-summoner/%d/recent"
+	_GetMatch        = "https://na.api.pvp.net/api/lol/%s/v2.2/match/%d?includeTimeline=true"
+	_GetMatchHistory = "https://na.api.pvp.net/api/lol/%s/v2.2/matchhistory/%d?beginIndex=%d"
 
 	_MaxSummonersPerQuery = 40
 )
@@ -218,17 +219,35 @@ func (c *crawler) getSummonersHelper(url, summoners string) (map[string]Summoner
 	return res, nil
 }
 
-// Lookup the recent games for a given summoner ID. Returns at most 10 games.
-func (c *crawler) getRecentGames(id int64) (*RecentGames, error) {
-	games := &RecentGames{}
+// Lookup a match by ID.
+func (c *crawler) getMatch(id int64) (*MatchDetail, error) {
+	match := &MatchDetail{}
 
-	//log.Printf("Fetching recent games for summoner: %d", id)
+	//log.Printf("Fetching match: %d", id)
 
-	url := fmt.Sprintf(_GetRecentGames, _Region, id)
-	err := c.fetchResource(url, games)
+	url := fmt.Sprintf(_GetMatch, _Region, id)
+	err := c.fetchResource(url, match)
 	if err != nil {
 		return nil, err
 	}
 
-	return games, nil
+	return match, nil
+}
+
+// Lookup match ID history for a summoner.
+// 		id - Summoner ID
+// 		start - begin index to use for fetching games.
+// Returns a slice of at most 15 match IDs or any errors that occurred.
+func (c *crawler) getMatchHistory(id, start int64) ([]MatchSummary, error) {
+	matches := make([]MatchSummary, 0)
+
+	//log.Printf("Fetching match history for summoner: %d", id)
+
+	url := fmt.Sprintf(_GetMatchHistory, _Region, id, start)
+	err := c.fetchResource(url, matches)
+	if err != nil {
+		return nil, err
+	}
+
+	return matches, nil
 }

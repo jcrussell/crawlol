@@ -39,46 +39,75 @@ func crawl(db gorm.DB, c *crawler) {
 		log.Printf("Crawling recent games for %d summoners", len(summoners))
 
 		newSummoners := make(map[int64]bool, 100)
-		newGames := 0
+		newMatches := 0
 
 		for _, summoner := range summoners {
-			// Look up the summoner's recent games
-			recent, err := c.getRecentGames(summoner.Id)
-			if err != nil {
-				log.Printf("Unable to fetch recent games for summoner: %d -- %s", summoner, err.Error())
-				continue
-			}
+			// Look up the summoner's match history, keep trying to get more until we
+			// find no new matches.
+			start := int64(0)
 
-			for _, game := range recent.Games {
-				// Check if we have already stored this game before
-				if db.Where(&Game{GameId: game.GameId, SummonerId: summoner.Id}).First(&Game{}).RecordNotFound() {
-					newGames++
+			for {
+				foundNewMatches := false
 
-					// Save new game
-					game.SummonerId = summoner.Id
-					if err := db.Create(&game).Error; err != nil {
-						log.Printf("Unable to save game: %d -- summoner: %d", game.GameId, summoner.Id)
-					}
+				// Query for the summoner's match history
+				matches, err := c.getMatchHistory(summoner.Id, start)
+				if err != nil {
+					log.Printf("Unable to fetch recent matches for summoner: %d (start = %d) -- %s", summoner, start, err.Error())
+					break
+				}
 
-					// Process the players that also played in this game
-					for _, player := range game.FellowPlayers {
-						// Check if we have already crawled summoner ID
-						if db.Where(&Summoner{Id: player.SummonerId}).First(&Summoner{}).RecordNotFound() {
-							// Haven't crawled summoner, add to newSummoners
-							newSummoners[player.SummonerId] = true
+				// Process the matches found
+				for _, match := range matches {
+					// Check if we've seen this match before
+					if db.Where(&MatchDetail{MatchID: match.MatchID}).First(&MatchDetail{}).RecordNotFound() {
+						// We haven't so we should note to try to get more matches for this
+						// summoner.
+						foundNewMatches = true
+						newMatches++
+
+						// Get the actual details for the match
+						details, err := c.getMatch(match.MatchID)
+						if err != nil {
+							log.Printf("Unable to fetch match details: %d -- %s", match.MatchID, err.Error())
+							continue
+						}
+
+						// Save the match details
+						if err := db.Create(&details).Error; err != nil {
+							log.Printf("Unable to save match details: %d -- summoner: %d", match.MatchID, summoner.Id)
+						}
+
+						// Finally, process the players to find new summoners
+						for _, identity := range details.ParticipantIdentities {
+							summonerID := identity.Player.SummonerID
+
+							// Check if we have already crawled summoner ID
+							if db.Where(&Summoner{Id: summonerID}).First(&Summoner{}).RecordNotFound() {
+								// Haven't crawled summoner, add to newSummoners
+								newSummoners[summonerID] = true
+							}
 						}
 					}
 				}
+
+				// Finished one batch of 15, move on to the next if there were new
+				// matches.
+				start += 15
+
+				if !foundNewMatches {
+					break
+				}
 			}
 
-			// Update the last crawled time to now for summoner
+			// Finished with summoner, for now. Update the last crawled field and save
+			// to the database.
 			summoner.LastCrawled = time.Now().UnixNano()
 			if err := db.Save(&summoner).Error; err != nil {
 				log.Printf("Unable to update last crawled for summoner: %d -- %s", summoner.Id, err.Error)
 			}
 		}
 
-		log.Printf("Crawled %d games and found %d new summoners", newGames, len(newSummoners))
+		log.Printf("Crawled %d new matches and found %d new summoners", newMatches, len(newSummoners))
 		lookupSummoners(db, c, newSummoners)
 	}
 }
@@ -86,6 +115,8 @@ func crawl(db gorm.DB, c *crawler) {
 func initDB(db gorm.DB) {
 	// TODO: Error checking?
 
+	/*
+	TODO: Figure out how to store MatchDetail
 	// Create summoner table
 	db.CreateTable(Summoner{})
 	db.Model(Summoner{}).AddUniqueIndex("idx_name", "name")
@@ -98,6 +129,7 @@ func initDB(db gorm.DB) {
 
 	// Create raw stats table
 	db.CreateTable(RawStats{})
+	*/
 }
 
 // Seed the database with summoners looked up by name.
@@ -164,6 +196,16 @@ func main() {
 	if err != nil {
 		log.Fatalf("Unable to open database: %s", err.Error())
 	}
+
+	// TODO: Remove, only here to test that we can fetch a match
+	match, err := c.getMatch(int64(1560034527))
+	if err != nil {
+		log.Printf("Error: %s", err.Error())
+	} else {
+		fmt.Printf("%#v", match)
+	}
+
+	os.Exit(0)
 
 	// Disable Gorm's logging
 	db.SetLogger(fakeLogger{})
