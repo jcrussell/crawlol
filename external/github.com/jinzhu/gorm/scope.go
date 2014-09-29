@@ -21,6 +21,7 @@ type Scope struct {
 	skipLeft      bool
 	primaryKey    string
 	instanceId    string
+	fields        map[string]*Field
 }
 
 func (scope *Scope) IndirectValue() reflect.Value {
@@ -33,13 +34,17 @@ func (scope *Scope) IndirectValue() reflect.Value {
 
 // NewScope create scope for callbacks, including DB's search information
 func (db *DB) NewScope(value interface{}) *Scope {
+	// reflectKind := reflect.ValueOf(value).Kind()
+	// if !((reflectKind == reflect.Invalid) || (reflectKind == reflect.Ptr)) {
+	// 	fmt.Printf("%v %v\n", fileWithLineNum(), "using unaddressable value")
+	// }
 	db.Value = value
 	return &Scope{db: db, Search: db.search, Value: value}
 }
 
 // New create a new Scope without search information
 func (scope *Scope) New(value interface{}) *Scope {
-	return &Scope{db: scope.db.parent, Search: &search{}, Value: value}
+	return &Scope{db: scope.db, Search: &search{}, Value: value}
 }
 
 // NewDB create a new DB without search information
@@ -91,7 +96,20 @@ func (scope *Scope) PrimaryKey() string {
 		return scope.primaryKey
 	}
 
-	scope.primaryKey = ToSnake(GetPrimaryKey(scope.Value))
+	var indirectValue = scope.IndirectValue()
+
+	clone := scope
+	if indirectValue.Kind() == reflect.Slice {
+		clone = scope.New(reflect.New(indirectValue.Type().Elem()).Elem().Interface())
+	}
+
+	for _, field := range clone.Fields() {
+		if field.IsPrimaryKey {
+			scope.primaryKey = field.DBName
+			break
+		}
+	}
+
 	return scope.primaryKey
 }
 
@@ -111,9 +129,19 @@ func (scope *Scope) PrimaryKeyValue() interface{} {
 }
 
 // HasColumn to check if has column
-func (scope *Scope) HasColumn(name string) bool {
-	_, result := scope.FieldValueByName(name)
-	return result
+func (scope *Scope) HasColumn(column string) bool {
+	clone := scope
+	if scope.IndirectValue().Kind() == reflect.Slice {
+		value := reflect.New(scope.IndirectValue().Type().Elem()).Interface()
+		clone = scope.New(value)
+	}
+
+	for _, field := range clone.Fields(false) {
+		if field.Name == column || field.DBName == column {
+			return true
+		}
+	}
+	return false
 }
 
 // FieldValueByName to get column's value and existence
@@ -122,12 +150,20 @@ func (scope *Scope) FieldValueByName(name string) (interface{}, bool) {
 }
 
 // SetColumn to set the column's value
-func (scope *Scope) SetColumn(column string, value interface{}) bool {
-	if scope.Value == nil {
-		return false
+func (scope *Scope) SetColumn(column interface{}, value interface{}) bool {
+	if field, ok := column.(*Field); ok {
+		return field.Set(value)
+	} else if str, ok := column.(string); ok {
+		if scope.Value == nil {
+			return false
+		}
+		for _, field := range scope.Fields() {
+			if field.Name == str || field.DBName == str {
+				return field.Set(value)
+			}
+		}
 	}
-
-	return setFieldValue(scope.IndirectValue().FieldByName(SnakeToUpperCamel(column)), value)
+	return false
 }
 
 // CallMethod invoke method with necessary argument
@@ -235,35 +271,39 @@ func (scope *Scope) CombinedConditionSql() string {
 }
 
 func (scope *Scope) FieldByName(name string) (field *Field, ok bool) {
-	var f reflect.StructField
-	if scope.Value != nil {
-		if scope.IndirectValue().Kind() == reflect.Struct {
-			if f, ok = scope.IndirectValue().Type().FieldByName(SnakeToUpperCamel(name)); ok {
-				field = scope.fieldFromStruct(f)
-			}
+	for _, field := range scope.Fields() {
+		if field.Name == name {
+			return field, true
 		}
 	}
-	return
+	return nil, false
 }
 
-func (scope *Scope) fieldFromStruct(fieldStruct reflect.StructField) *Field {
+func (scope *Scope) fieldFromStruct(fieldStruct reflect.StructField, withRelation bool) []*Field {
 	var field Field
 	field.Name = fieldStruct.Name
 	field.DBName = ToSnake(fieldStruct.Name)
 
 	value := scope.IndirectValue().FieldByName(fieldStruct.Name)
 	indirectValue := reflect.Indirect(value)
-	field.Value = value.Interface()
+	field.Field = value
 	field.IsBlank = isBlank(value)
 
 	// Search for primary key tag identifier
 	settings := parseTagSetting(fieldStruct.Tag.Get("gorm"))
-	if scope.PrimaryKey() == field.DBName {
+	if _, ok := settings["PRIMARY_KEY"]; ok {
 		field.IsPrimaryKey = true
 	}
 
 	field.Tag = fieldStruct.Tag
-	field.SqlTag = scope.sqlTagForField(&field)
+
+	tagIdentifier := "sql"
+	if scope.db != nil {
+		tagIdentifier = scope.db.parent.tagIdentifier
+	}
+	if fieldStruct.Tag.Get(tagIdentifier) == "-" {
+		field.IsIgnored = true
+	}
 
 	if !field.IsIgnored {
 		// parse association
@@ -271,16 +311,17 @@ func (scope *Scope) fieldFromStruct(fieldStruct reflect.StructField) *Field {
 			indirectValue = reflect.New(value.Type())
 		}
 		typ := indirectValue.Type()
+		scopeTyp := scope.IndirectValue().Type()
+
 		foreignKey := SnakeToUpperCamel(settings["FOREIGNKEY"])
 		associationForeignKey := SnakeToUpperCamel(settings["ASSOCIATIONFOREIGNKEY"])
 		many2many := settings["MANY2MANY"]
-		scopeTyp := scope.IndirectValue().Type()
 
 		switch indirectValue.Kind() {
 		case reflect.Slice:
 			typ = typ.Elem()
 
-			if typ.Kind() == reflect.Struct {
+			if (typ.Kind() == reflect.Struct) && withRelation {
 				if foreignKey == "" {
 					foreignKey = scopeTyp.Name() + "Id"
 				}
@@ -305,40 +346,89 @@ func (scope *Scope) fieldFromStruct(fieldStruct reflect.StructField) *Field {
 				if many2many != "" {
 					field.Relationship.Kind = "many_to_many"
 				}
+			} else {
+				field.IsNormal = true
 			}
 		case reflect.Struct:
-			if !field.IsTime() && !field.IsScanner() {
-				if foreignKey == "" && scope.HasColumn(field.Name+"Id") {
-					field.Relationship = &relationship{ForeignKey: field.Name + "Id", Kind: "belongs_to"}
-				} else if scope.HasColumn(foreignKey) {
-					field.Relationship = &relationship{ForeignKey: foreignKey, Kind: "belongs_to"}
-				} else {
-					if foreignKey == "" {
-						foreignKey = scopeTyp.Name() + "Id"
-					}
-					if reflect.New(typ).Elem().FieldByName(foreignKey).IsValid() {
-						field.Relationship = &relationship{ForeignKey: foreignKey, Kind: "has_one"}
+			if field.IsTime() || field.IsScanner() {
+				field.IsNormal = true
+			} else if _, ok := settings["EMBEDDED"]; ok || fieldStruct.Anonymous {
+				var fields []*Field
+				if field.Field.CanAddr() {
+					for _, field := range scope.New(field.Field.Addr().Interface()).Fields() {
+						field.DBName = field.DBName
+						fields = append(fields, field)
 					}
 				}
+				return fields
+			} else if withRelation {
+				var belongsToForeignKey, hasOneForeignKey, kind string
+
+				if foreignKey == "" {
+					belongsToForeignKey = field.Name + "Id"
+					hasOneForeignKey = scopeTyp.Name() + "Id"
+				} else {
+					belongsToForeignKey = foreignKey
+					hasOneForeignKey = foreignKey
+				}
+
+				if scope.HasColumn(belongsToForeignKey) {
+					foreignKey = belongsToForeignKey
+					kind = "belongs_to"
+				} else {
+					foreignKey = hasOneForeignKey
+					kind = "has_one"
+				}
+
+				field.Relationship = &relationship{ForeignKey: foreignKey, Kind: kind}
 			}
+		default:
+			field.IsNormal = true
 		}
 	}
-	return &field
+	return []*Field{&field}
 }
 
 // Fields get value's fields
-func (scope *Scope) Fields() (fields []*Field) {
-	if scope.IndirectValue().IsValid() {
+func (scope *Scope) Fields(noRelations ...bool) map[string]*Field {
+	if scope.fields != nil {
+		return scope.fields
+	}
+	var withRelation = len(noRelations) == 0
+
+	var fields = map[string]*Field{}
+	if scope.IndirectValue().IsValid() && scope.IndirectValue().Kind() == reflect.Struct {
 		scopeTyp := scope.IndirectValue().Type()
+		var hasPrimaryKey = false
 		for i := 0; i < scopeTyp.NumField(); i++ {
 			fieldStruct := scopeTyp.Field(i)
 			if !ast.IsExported(fieldStruct.Name) {
 				continue
 			}
-			fields = append(fields, scope.fieldFromStruct(fieldStruct))
+			for _, field := range scope.fieldFromStruct(fieldStruct, withRelation) {
+				if field.IsPrimaryKey {
+					hasPrimaryKey = true
+				}
+				if _, ok := fields[field.DBName]; ok {
+					panic(fmt.Sprintf("Duplicated column name for %v (%v)\n", scope.typeName(), fileWithLineNum()))
+				} else {
+					fields[field.DBName] = field
+				}
+			}
+		}
+
+		if !hasPrimaryKey {
+			if field, ok := fields["id"]; ok {
+				field.IsPrimaryKey = true
+			}
 		}
 	}
-	return
+
+	if withRelation {
+		scope.fields = fields
+	}
+
+	return fields
 }
 
 // Raw set sql
@@ -349,7 +439,7 @@ func (scope *Scope) Raw(sql string) *Scope {
 
 // Exec invoke sql
 func (scope *Scope) Exec() *Scope {
-	defer scope.Trace(time.Now())
+	defer scope.Trace(NowFunc())
 
 	if !scope.HasError() {
 		result, err := scope.DB().Exec(scope.Sql, scope.SqlVars...)

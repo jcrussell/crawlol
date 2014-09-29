@@ -5,7 +5,18 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"time"
 )
+
+// NowFunc returns current time, this function is exported in order to be able
+// to give the flexiblity to the developer to costumize it accoring to their
+// needs
+//
+//   e.g: return time.Now().UTC()
+//
+var NowFunc = func() time.Time {
+	return time.Now()
+}
 
 type DB struct {
 	Value         interface{}
@@ -40,7 +51,9 @@ func Open(dialect string, drivesources ...string) (DB, error) {
 			source = drivesources[1]
 		}
 
-		db = DB{dialect: NewDialect(dialect), tagIdentifier: "sql", logger: defaultLogger, callback: DefaultCallback, source: source, values: map[string]interface{}{}}
+		db = DB{dialect: NewDialect(dialect), tagIdentifier: "sql",
+			logger: defaultLogger, callback: DefaultCallback, source: source,
+			values: map[string]interface{}{}}
 		db.db, err = sql.Open(driver, source)
 		db.parent = &db
 	}
@@ -335,6 +348,12 @@ func (s *DB) DropTableIfExists(value interface{}) *DB {
 	return s.clone().NewScope(value).dropTableIfExists().db
 }
 
+func (s *DB) HasTable(value interface{}) bool {
+	scope := s.clone().NewScope(value)
+	tableName := scope.TableName()
+	return scope.Dialect().HasTable(scope, tableName)
+}
+
 func (s *DB) AutoMigrate(values ...interface{}) *DB {
 	db := s.clone()
 	for _, value := range values {
@@ -377,14 +396,13 @@ func (s *DB) Association(column string) *Association {
 	}
 
 	var field *Field
-	scopeType := scope.IndirectValue().Type()
-	if f, ok := scopeType.FieldByName(SnakeToUpperCamel(column)); ok {
-		field = scope.fieldFromStruct(f)
+	var ok bool
+	if field, ok = scope.FieldByName(SnakeToUpperCamel(column)); ok {
 		if field.Relationship == nil || field.Relationship.ForeignKey == "" {
-			scope.Err(fmt.Errorf("invalid association %v for %v", column, scopeType))
+			scope.Err(fmt.Errorf("invalid association %v for %v", column, scope.IndirectValue().Type()))
 		}
 	} else {
-		scope.Err(fmt.Errorf("%v doesn't have column %v", scopeType, column))
+		scope.Err(fmt.Errorf("%v doesn't have column %v", scope.IndirectValue().Type(), column))
 	}
 
 	return &Association{Scope: scope, Column: column, Error: s.Error, PrimaryKey: primaryKey, Field: field}

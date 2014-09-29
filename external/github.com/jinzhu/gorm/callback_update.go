@@ -3,7 +3,6 @@ package gorm
 import (
 	"fmt"
 	"strings"
-	"time"
 )
 
 func AssignUpdateAttributes(scope *Scope) {
@@ -26,17 +25,15 @@ func AssignUpdateAttributes(scope *Scope) {
 }
 
 func BeforeUpdate(scope *Scope) {
-	_, ok := scope.Get("gorm:update_column")
-	if !ok {
+	if _, ok := scope.Get("gorm:update_column"); !ok {
 		scope.CallMethod("BeforeSave")
 		scope.CallMethod("BeforeUpdate")
 	}
 }
 
 func UpdateTimeStampWhenUpdate(scope *Scope) {
-	_, ok := scope.Get("gorm:update_column")
-	if !ok {
-		scope.SetColumn("UpdatedAt", time.Now())
+	if _, ok := scope.Get("gorm:update_column"); !ok {
+		scope.SetColumn("UpdatedAt", NowFunc())
 	}
 }
 
@@ -51,8 +48,8 @@ func Update(scope *Scope) {
 			}
 		} else {
 			for _, field := range scope.Fields() {
-				if field.DBName != scope.PrimaryKey() && len(field.SqlTag) > 0 && !field.IsIgnored {
-					sqls = append(sqls, fmt.Sprintf("%v = %v", scope.Quote(field.DBName), scope.AddToVars(field.Value)))
+				if !field.IsPrimaryKey && field.IsNormal && !field.IsIgnored {
+					sqls = append(sqls, fmt.Sprintf("%v = %v", scope.Quote(field.DBName), scope.AddToVars(field.Field.Interface())))
 				}
 			}
 		}

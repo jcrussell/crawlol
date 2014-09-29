@@ -3,7 +3,6 @@ package gorm
 import (
 	"fmt"
 	"strings"
-	"time"
 )
 
 func BeforeCreate(scope *Scope) {
@@ -13,23 +12,23 @@ func BeforeCreate(scope *Scope) {
 
 func UpdateTimeStampWhenCreate(scope *Scope) {
 	if !scope.HasError() {
-		now := time.Now()
+		now := NowFunc()
 		scope.SetColumn("CreatedAt", now)
 		scope.SetColumn("UpdatedAt", now)
 	}
 }
 
 func Create(scope *Scope) {
-	defer scope.Trace(time.Now())
+	defer scope.Trace(NowFunc())
 
 	if !scope.HasError() {
 		// set create sql
 		var sqls, columns []string
 
 		for _, field := range scope.Fields() {
-			if len(field.SqlTag) > 0 && !field.IsIgnored && (field.DBName != scope.PrimaryKey() || !scope.PrimaryKeyZero()) {
+			if field.IsNormal && (!field.IsPrimaryKey || !scope.PrimaryKeyZero()) {
 				columns = append(columns, scope.Quote(field.DBName))
-				sqls = append(sqls, scope.AddToVars(field.Value))
+				sqls = append(sqls, scope.AddToVars(field.Field.Interface()))
 			}
 		}
 
