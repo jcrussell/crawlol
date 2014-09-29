@@ -136,6 +136,7 @@ func (c *crawler) fetchResource(url string, dst interface{}) error {
 
 	for retries := 0; retries < c.MaxRetries; retries++ {
 		//log.Printf("Attempting to get URL: %s, retries = %d", u, retries)
+
 		if retries != 0 {
 			// Didn't succeed on previous attempt, sleep for a bit (in addition to the
 			// rate limiting) before trying again.
@@ -178,7 +179,7 @@ func (c *crawler) fetchResource(url string, dst interface{}) error {
 	}
 
 	if err != nil {
-		return fmt.Errorf("max retries exceeded for API request (last error: %s)", err.Error())
+		return fmt.Errorf("max retries exceeded for API request (last error: \"%s\")", err.Error())
 	}
 
 	return errors.New("unknown error occured while fetching resource")
@@ -238,8 +239,15 @@ func (c *crawler) getMatch(id int64) (*MatchDetail, error) {
 // 		id - Summoner ID
 // 		start - begin index to use for fetching games.
 // Returns a slice of at most 15 match IDs or any errors that occurred.
-func (c *crawler) getMatchHistory(id, start int64) ([]MatchSummary, error) {
-	matches := make([]MatchSummary, 0)
+func (c *crawler) getMatchHistory(id, start int64) ([]int64, error) {
+	// There are a lot more fields returned by the API request, however, we
+	// really only care about the MatchID since we'll use it to request the full
+	// details.
+	type summary struct {
+		MatchID int64 // ID of the match
+	}
+
+	matches := make([]summary, 0)
 
 	//log.Printf("Fetching match history for summoner: %d", id)
 
@@ -249,5 +257,11 @@ func (c *crawler) getMatchHistory(id, start int64) ([]MatchSummary, error) {
 		return nil, err
 	}
 
-	return matches, nil
+	// Pull ID out of each match
+	ids := make([]int64, 0, len(matches))
+	for _, match := range matches {
+		ids = append(ids, match.MatchID)
+	}
+
+	return ids, nil
 }

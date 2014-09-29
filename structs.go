@@ -10,28 +10,22 @@ type Summoner struct {
 	LastCrawled int64 // Last time summoner's games were crawled, specified as epoch milliseconds.
 }
 
-// There are a lot more fields returned by the API request, however, we really
-// only care about the MatchID since we'll use it to request the full details.
-type MatchSummary struct {
-	MatchID int64 // ID of the match
-}
-
-type MatchDetail struct {
-	MapID int // Match map ID
+// BaseMatchDetail contains fields common to MatchDetail and
+// MarshaledMatchDetail.
+type BaseMatchDetail struct {
+	Id    int64 `json:"MatchID"` // ID of the match
+	MapId int   // Match map ID
 	// Match creation time. Designates when the team select lobby is created
 	// and/or the match is made through match making, not when the game actually
 	// starts.
 	MatchCreation int64
 	MatchDuration int64 // Match duration
-	MatchID       int64 // ID of the match
 	// Match mode (legal values: CLASSIC, ODIN, ARAM, TUTORIAL, ONEFORALL,
 	// ASCENSION, FIRSTBLOOD)
 	MatchMode string
 	// Match type (legal values: CUSTOM_GAME, MATCHED_GAME, TUTORIAL_GAME)
-	MatchType             string
-	MatchVersion          string                // Match version
-	ParticipantIdentities []ParticipantIdentity // Participant identity information
-	Participants          []Participant         // Participant information
+	MatchType    string
+	MatchVersion string // Match version
 	// Match queue type (legal values: CUSTOM, NORMAL_5x5_BLIND, RANKED_SOLO_5x5,
 	// RANKED_PREMADE_5x5, BOT_5x5, NORMAL_3x3, RANKED_PREMADE_3x3,
 	// NORMAL_5x5_DRAFT, ODIN_5x5_BLIND, ODIN_5x5_DRAFT, BOT_ODIN_5x5,
@@ -44,9 +38,23 @@ type MatchDetail struct {
 	Region    string // Region where the match was played
 	// Season match was played (legal values: PRESEASON3, SEASON3, PRESEASON2014,
 	// SEASON2014)
-	Season   string
-	Teams    []Team   // Team information
-	Timeline Timeline // Match timeline data.
+	Season string
+}
+
+// MatchDetail is the struct returned by Riot's API.
+type MatchDetail struct {
+	BaseMatchDetail                             // Embed all fields from BaseMatchDetail
+	ParticipantIdentities []ParticipantIdentity // Participant identity information
+	Participants          []Participant         // Participant information
+	Teams                 []Team                // Team information
+	Timeline              Timeline              // Match timeline data.
+}
+
+// MarshaledMatchDetail is saveable to the database without too much headache.
+type MarshaledMatchDetail struct {
+	BaseMatchDetail // Embed all fields from BaseMatchDetail
+	// JSON-serialized versions of the fields from MatchDetail
+	ParticipantIdentities, Participants, Teams, Timeline []byte
 }
 
 type Participant struct {

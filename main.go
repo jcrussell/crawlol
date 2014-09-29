@@ -20,7 +20,6 @@ var (
 	maxRetries             = flag.Uint("max-retries", 2, "Maximum number of times to retry a request")
 	dbPath                 = flag.String("db", "crawlol.db", "Location for the SQLite database")
 	seedSummoners          = flag.String("seed", "", "List of summoner names (separated by ',') to use to seed the database")
-	newDatabase            = flag.Bool("init-db", false, "Specify that the database is new and tables should be created")
 )
 
 func crawl(db gorm.DB, c *crawler) {
@@ -58,23 +57,29 @@ func crawl(db gorm.DB, c *crawler) {
 
 				// Process the matches found
 				for _, match := range matches {
+					// Construct a MatchDetail for query. Note that we cannot set MatchID in
+					// the composite literal because MatchID is a promoted field.
+					details := &MatchDetail{}
+					details.Id = match
+
 					// Check if we've seen this match before
-					if db.Where(&MatchDetail{MatchID: match.MatchID}).First(&MatchDetail{}).RecordNotFound() {
+					if db.Where(details).First(&MatchDetail{}).RecordNotFound() {
 						// We haven't so we should note to try to get more matches for this
 						// summoner.
 						foundNewMatches = true
 						newMatches++
 
 						// Get the actual details for the match
-						details, err := c.getMatch(match.MatchID)
+						details, err := c.getMatch(match)
 						if err != nil {
-							log.Printf("Unable to fetch match details: %d -- %s", match.MatchID, err.Error())
+							log.Printf("Unable to fetch match details: %d -- %s", match, err.Error())
 							continue
 						}
 
-						// Save the match details
-						if err := db.Create(&details).Error; err != nil {
-							log.Printf("Unable to save match details: %d -- summoner: %d", match.MatchID, summoner.Id)
+						// Save the match. If there's an error, we can still hopefully find new
+						// summoner IDs in the participant list.
+						if err := saveMatch(db, details); err != nil {
+							log.Printf(err.Error())
 						}
 
 						// Finally, process the players to find new summoners
@@ -112,26 +117,6 @@ func crawl(db gorm.DB, c *crawler) {
 	}
 }
 
-func initDB(db gorm.DB) {
-	// TODO: Error checking?
-
-	/*
-	TODO: Figure out how to store MatchDetail
-	// Create summoner table
-	db.CreateTable(Summoner{})
-	db.Model(Summoner{}).AddUniqueIndex("idx_name", "name")
-	db.Model(Summoner{}).AddIndex("idx_last_crawled", "last_crawled")
-
-	// Create game table
-	db.CreateTable(Game{})
-	db.Model(Game{}).AddUniqueIndex("idx_game_summoner_id", "summoner_id", "game_id")
-	db.Model(Game{}).AddIndex("idx_game_id", "game_id")
-
-	// Create raw stats table
-	db.CreateTable(RawStats{})
-	*/
-}
-
 // Seed the database with summoners looked up by name.
 func seedDatabase(db gorm.DB, c *crawler) {
 	names := strings.Split(*seedSummoners, ",")
@@ -141,16 +126,6 @@ func seedDatabase(db gorm.DB, c *crawler) {
 		log.Fatalf("Unable to fetch seed summoners: %s", err.Error())
 	} else {
 		saveSummoners(db, summoners)
-	}
-}
-
-// Save new summoners to the database, set the last crawled time as never.
-func saveSummoners(db gorm.DB, summoners map[string]Summoner) {
-	for _, summoner := range summoners {
-		summoner.LastCrawled = 0
-		if err := db.Create(&summoner).Error; err != nil {
-			log.Printf("Unable to save summoner: %d -- %s", summoner.Id, err.Error())
-		}
 	}
 }
 
@@ -177,10 +152,6 @@ func lookupSummoners(db gorm.DB, c *crawler, summoners map[int64]bool) {
 	}
 }
 
-type fakeLogger struct{}
-
-func (fakeLogger) Print(v ...interface{}) {}
-
 func main() {
 	flag.Parse()
 
@@ -192,26 +163,9 @@ func main() {
 	c := newCrawler(flag.Arg(0), int(*rateLimitPerTenSeconds),
 		int(*rateLimitPerTenMinutes), int(*maxRetries))
 
-	db, err := gorm.Open("sqlite3", *dbPath)
+	db, err := openDB(*dbPath)
 	if err != nil {
 		log.Fatalf("Unable to open database: %s", err.Error())
-	}
-
-	// TODO: Remove, only here to test that we can fetch a match
-	match, err := c.getMatch(int64(1560034527))
-	if err != nil {
-		log.Printf("Error: %s", err.Error())
-	} else {
-		fmt.Printf("%#v", match)
-	}
-
-	os.Exit(0)
-
-	// Disable Gorm's logging
-	db.SetLogger(fakeLogger{})
-
-	if *newDatabase {
-		initDB(db)
 	}
 
 	if *seedSummoners != "" {
