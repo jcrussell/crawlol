@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
 	"strings"
 	"time"
 
@@ -22,8 +23,19 @@ var (
 	seedSummoners          = flag.String("seed", "", "List of summoner names (separated by ',') to use to seed the database")
 )
 
+var shutdownChan chan os.Signal
+
 func crawl(db gorm.DB, c *crawler) {
 	for {
+		// Check whether we should stop crawling or not
+		select {
+		case <-shutdownChan:
+			log.Println("Shutting down crawler")
+			return
+		default:
+			// Keep on crawlin'
+		}
+
 		// Only recrawl summoners once every 12 hours
 		lastCrawled := time.Now().Add(-12 * time.Hour)
 
@@ -171,6 +183,9 @@ func main() {
 	if *seedSummoners != "" {
 		seedDatabase(db, c)
 	}
+
+	shutdownChan = make(chan os.Signal, 1)
+	signal.Notify(shutdownChan, os.Interrupt, os.Kill)
 
 	crawl(db, c)
 
