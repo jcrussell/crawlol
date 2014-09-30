@@ -243,23 +243,27 @@ func (c *crawler) getMatchHistory(id, start int64) ([]int64, error) {
 	// There are a lot more fields returned by the API request, however, we
 	// really only care about the MatchID since we'll use it to request the full
 	// details.
-	type summary struct {
+	type matchSummary struct {
 		MatchID int64 // ID of the match
 	}
 
-	matches := make([]summary, 0)
+	type playerHistory struct {
+		Matches []matchSummary
+	}
+
+	history := &playerHistory{}
 
 	//log.Printf("Fetching match history for summoner: %d", id)
 
 	url := fmt.Sprintf(_GetMatchHistory, _Region, id, start)
-	err := c.fetchResource(url, matches)
+	err := c.fetchResource(url, history)
 	if err != nil {
 		return nil, err
 	}
 
 	// Pull ID out of each match
-	ids := make([]int64, 0, len(matches))
-	for _, match := range matches {
+	ids := make([]int64, 0, len(history.Matches))
+	for _, match := range history.Matches {
 		ids = append(ids, match.MatchID)
 	}
 
