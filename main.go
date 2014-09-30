@@ -51,7 +51,7 @@ func crawl(db gorm.DB, c *crawler) {
 				// Query for the summoner's match history
 				matches, err := c.getMatchHistory(summoner.Id, start)
 				if err != nil {
-					log.Printf("Unable to fetch recent matches for summoner: %d (start = %d) -- %s", summoner, start, err.Error())
+					log.Printf("Unable to fetch recent matches for summoner: %s (start = %d) -- %s", summoner.Name, start, err.Error())
 					break
 				}
 
@@ -63,7 +63,7 @@ func crawl(db gorm.DB, c *crawler) {
 					details.Id = match
 
 					// Check if we've seen this match before
-					if db.Where(details).First(&MatchDetail{}).RecordNotFound() {
+					if db.Where(details).First(&MarshaledMatchDetail{}).RecordNotFound() {
 						// We haven't so we should note to try to get more matches for this
 						// summoner.
 						foundNewMatches = true
